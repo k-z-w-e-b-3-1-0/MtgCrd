@@ -1,0 +1,26 @@
+[
+  {
+    "id": "evt-20240515-standup",
+    "projectId": "prd-support",
+    "projectName": "サポート改善プロジェクト",
+    "facilitatorId": "saito",
+    "facilitatorName": "斎藤 奈緒",
+    "date": "2024-05-15",
+    "startTime": "09:30",
+    "agenda": "- 昨日の進捗共有\n- 今日の予定\n- 課題・サポートが必要なこと",
+    "agendaSource": "日次スタンドアップ（定番）",
+    "createdAt": "2024-05-01T00:00:00.000Z"
+  },
+  {
+    "id": "evt-20240603-retro",
+    "projectId": "prd-mobile",
+    "projectName": "モバイルアプリ刷新",
+    "facilitatorId": "smith",
+    "facilitatorName": "Alex Smith",
+    "date": "2024-06-03",
+    "startTime": "10:00",
+    "agenda": "- うまくいったこと\n- 改善したいこと\n- 明日試したいアクション",
+    "agendaSource": "ライトふりかえり",
+    "createdAt": "2024-05-15T00:00:00.000Z"
+  }
+]

@@ -1,0 +1,17 @@
+{
+  "name": "mtgcrd",
+  "version": "1.0.0",
+  "description": "Redmine プロジェクトをもとに日次ミーティングをカレンダー管理できるデモスケジューラーです。",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "check": "node --check server.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "engines": {
+    "node": ">=18"
+  }
+}
