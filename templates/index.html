@@ -1,0 +1,162 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>日次ミーティング スケジューラー</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css" />
+    <link rel="stylesheet" href="/static/css/styles.css" />
+  </head>
+  <body>
+    <main class="container">
+      <header>
+        <h1>日次ミーティング スケジューラー</h1>
+        <p class="lead">
+          Redmine プロジェクトとメンバーを基に、日次ミーティングのファシリテーターを日付・時刻付きでスケジュールできます。
+          アジェンダはテンプレートまたは自由入力に対応し、Slack Webhook を設定すればカレンダー登録と同時に通知できます。
+        </p>
+      </header>
+
+      <div class="layout">
+        <section class="scheduler-form">
+          <form id="assignment-form">
+            <fieldset>
+              <label for="project-select">プロジェクト</label>
+              <select id="project-select" name="projectId" required>
+                <option value="" disabled selected>プロジェクトを選択してください</option>
+              </select>
+            </fieldset>
+
+            <fieldset>
+              <label for="facilitator-select">ファシリテーター</label>
+              <select id="facilitator-select" name="facilitatorId" required disabled>
+                <option value="" disabled selected>メンバーを選択してください</option>
+              </select>
+            </fieldset>
+
+            <fieldset>
+              <label for="template-select">アジェンダテンプレート</label>
+              <select id="template-select" name="templateId">
+                <option value="" selected>テンプレートを使用しない</option>
+              </select>
+            </fieldset>
+
+            <div class="grid">
+              <label>
+                日付
+                <input type="date" id="date-input" name="date" required />
+              </label>
+              <label>
+                開始時刻
+                <input type="time" id="time-input" name="startTime" required />
+              </label>
+            </div>
+
+            <fieldset>
+              <label for="agenda-input">アジェンダ（自由入力）</label>
+              <textarea
+                id="agenda-input"
+                name="customAgenda"
+                rows="6"
+                placeholder="テンプレートを使用しない場合はこちらに入力"
+              ></textarea>
+              <small>テンプレートを選択した場合でも、必要に応じて編集できます。</small>
+            </fieldset>
+
+            <button type="submit" id="submit-button">ミーティングをスケジュール</button>
+          </form>
+
+          <section id="result" hidden>
+            <h2>最新のスケジュール</h2>
+            <article id="summary"></article>
+            <p id="slack-status" class="muted"></p>
+          </section>
+        </section>
+
+        <section class="scheduler-calendar" aria-label="スケジュールカレンダー">
+          <div class="calendar-header">
+            <button type="button" class="calendar-nav" id="prev-month" aria-label="前の月">&lsaquo;</button>
+            <h2 id="current-month" class="calendar-month"></h2>
+            <button type="button" class="calendar-nav" id="next-month" aria-label="次の月">&rsaquo;</button>
+          </div>
+          <div class="calendar-weekdays">
+            <span>日</span>
+            <span>月</span>
+            <span>火</span>
+            <span>水</span>
+            <span>木</span>
+            <span>金</span>
+            <span>土</span>
+          </div>
+          <div id="calendar-grid" class="calendar-grid" aria-live="polite"></div>
+        </section>
+      </div>
+
+      <section class="project-management" aria-label="プロジェクトとメンバーの管理">
+        <h2>プロジェクトとメンバーの管理</h2>
+        <p id="project-status" class="project-status" role="status" aria-live="polite"></p>
+        <div class="project-management__actions">
+          <button type="button" id="refresh-projects" class="secondary">Redmine から再取得</button>
+          <span id="project-update-notice" class="project-notice" aria-live="polite"></span>
+        </div>
+        <div class="grid project-management__forms">
+          <form id="custom-project-form">
+            <fieldset>
+              <legend>カスタムプロジェクトを追加</legend>
+              <label for="custom-project-name">プロジェクト名</label>
+              <input
+                type="text"
+                id="custom-project-name"
+                name="customProjectName"
+                placeholder="例: 社内改善タスクフォース"
+                required
+              />
+              <label for="custom-project-members">メンバー（1 行につき 1 名）</label>
+              <textarea
+                id="custom-project-members"
+                name="customProjectMembers"
+                rows="5"
+                placeholder="例: 山田 太郎&#10;佐藤 花子"
+                required
+              ></textarea>
+              <small>入力したプロジェクトはこのアプリ内に保存され、Redmine には影響しません。</small>
+            </fieldset>
+            <button type="submit">カスタムプロジェクトを登録</button>
+          </form>
+
+          <form id="custom-member-form">
+            <fieldset>
+              <legend>既存プロジェクトにメンバーを追加</legend>
+              <label for="custom-member-project">対象プロジェクト</label>
+              <select id="custom-member-project" required>
+                <option value="" disabled selected>プロジェクトを選択してください</option>
+              </select>
+              <label for="custom-member-names">メンバー（1 行につき 1 名）</label>
+              <textarea
+                id="custom-member-names"
+                name="customMemberNames"
+                rows="5"
+                placeholder="例: 鈴木 次郎"
+                required
+              ></textarea>
+              <small>Redmine から取得したプロジェクトにも、アプリ内だけで使うメンバーを追加できます。</small>
+            </fieldset>
+            <button type="submit">メンバーを追加</button>
+          </form>
+        </div>
+      </section>
+
+      <dialog id="error-dialog">
+        <article>
+          <header>
+            <button class="close" data-target="error-dialog" aria-label="閉じる"></button>
+            <h3>エラー</h3>
+          </header>
+          <p id="error-message"></p>
+        </article>
+      </dialog>
+    </main>
+
+    <script type="module" src="/static/js/app.js"></script>
+  </body>
+</html>

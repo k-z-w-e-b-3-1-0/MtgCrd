@@ -1,0 +1,29 @@
+[
+  {
+    "id": "prd-support",
+    "name": "サポート改善プロジェクト",
+    "members": [
+      {"id": "saito", "name": "斎藤 奈緒"},
+      {"id": "tanaka", "name": "田中 一郎"},
+      {"id": "lee", "name": "イ・ジウン"}
+    ]
+  },
+  {
+    "id": "prd-mobile",
+    "name": "モバイルアプリ刷新",
+    "members": [
+      {"id": "yamada", "name": "山田 花子"},
+      {"id": "smith", "name": "Alex Smith"},
+      {"id": "kato", "name": "加藤 誠"},
+      {"id": "watanabe", "name": "渡辺 明"}
+    ]
+  },
+  {
+    "id": "prd-analytics",
+    "name": "データ分析高度化",
+    "members": [
+      {"id": "suzuki", "name": "鈴木 次郎"},
+      {"id": "kobayashi", "name": "小林 由美"}
+    ]
+  }
+]
