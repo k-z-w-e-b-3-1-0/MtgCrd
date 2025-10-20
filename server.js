@@ -22,6 +22,9 @@ sortScheduleInPlace(schedule);
 
 const port = Number.parseInt(process.env.PORT || "3000", 10);
 
+const EVENT_TYPE_MEETING = "meeting";
+const EVENT_TYPE_SHARED = "shared";
+
 const server = http.createServer(async (req, res) => {
   const method = req.method || "GET";
   const requestUrl = new URL(req.url || "/", `http://${req.headers.host}`);
@@ -59,6 +62,33 @@ const server = http.createServer(async (req, res) => {
     if (method === "POST" && pathname === "/api/schedule") {
       const body = await readJsonBody(req);
       return await handleScheduleCreate(body, res);
+    }
+
+    const scheduleUpdateMatch = pathname.match(/^\/api\/schedule\/([^/]+)$/);
+    if (method === "PUT" && scheduleUpdateMatch) {
+      const eventId = decodeURIComponent(scheduleUpdateMatch[1]);
+      const body = await readJsonBody(req);
+      return await handleScheduleUpdate(eventId, body, res);
+    }
+
+    if (method === "DELETE" && scheduleUpdateMatch) {
+      const eventId = decodeURIComponent(scheduleUpdateMatch[1]);
+      return await handleScheduleDelete(eventId, res);
+    }
+
+    if (method === "GET" && pathname === "/api/holidays") {
+      return handleHolidayList(res);
+    }
+
+    if (method === "POST" && pathname === "/api/holidays") {
+      const body = await readJsonBody(req);
+      return handleHolidayCreate(body, res);
+    }
+
+    const holidayDeleteMatch = pathname.match(/^\/api\/holidays\/([^/]+)$/);
+    if (method === "DELETE" && holidayDeleteMatch) {
+      const holidayId = decodeURIComponent(holidayDeleteMatch[1]);
+      return handleHolidayDelete(holidayId, res);
     }
 
     if (method === "POST" && pathname === "/api/assign") {
@@ -397,6 +427,23 @@ function generateCustomMemberId(projectId) {
   return `${projectId}-member-${Math.random().toString(36).slice(2, 8)}`;
 }
 
+function generateHolidayId(date, name) {
+  const base = `${date}-${name}`.replace(/[^0-9a-zA-Z]+/g, "").slice(0, 20);
+  const timestamp = Date.now().toString(36);
+  return `hol-${base || date.replace(/[^0-9]/g, "")}-${timestamp}`;
+}
+
+function getSortedHolidays() {
+  const holidays = customData.holidays || [];
+  return holidays
+    .slice()
+    .sort((a, b) => {
+      if (a.date < b.date) return -1;
+      if (a.date > b.date) return 1;
+      return (a.name || "").localeCompare(b.name || "", "ja");
+    });
+}
+
 function loadLocalProjects() {
   const raw = readJsonFile(path.join(DATA_DIR, "projects.json"));
   return raw.map((project) => ({
@@ -437,7 +484,7 @@ function loadCustomData() {
     return normalizeCustomData(raw);
   } catch (error) {
     if (error.code === "ENOENT") {
-      return { projects: [], memberOverrides: {} };
+      return { projects: [], memberOverrides: {}, holidays: [] };
     }
     throw error;
   }
@@ -482,7 +529,21 @@ function normalizeCustomData(raw) {
         }, {})
       : {};
 
-  return { projects: normalizedProjects, memberOverrides };
+  const rawHolidays = Array.isArray(raw.holidays) ? raw.holidays : [];
+  const holidays = rawHolidays
+    .map((holiday) => {
+      const date = typeof holiday?.date === "string" ? holiday.date : "";
+      const name = typeof holiday?.name === "string" ? holiday.name.trim() : "";
+      if (!isValidDateInput(date) || !name) {
+        return null;
+      }
+      const id = holiday && holiday.id ? String(holiday.id) : generateHolidayId(date, name);
+      const createdAt = typeof holiday?.createdAt === "string" ? holiday.createdAt : new Date().toISOString();
+      return { id, date, name, createdAt };
+    })
+    .filter((holiday) => holiday !== null);
+
+  return { projects: normalizedProjects, memberOverrides, holidays };
 }
 
 function saveCustomData() {
@@ -491,17 +552,28 @@ function saveCustomData() {
 }
 
 function normalizeEventFromFile(event) {
+  const eventType = event && event.eventType === EVENT_TYPE_SHARED ? EVENT_TYPE_SHARED : EVENT_TYPE_MEETING;
+  const projectId = event && event.projectId ? String(event.projectId) : "";
+  const projectName = typeof event?.projectName === "string" ? event.projectName : "";
+  const facilitatorId = event && event.facilitatorId ? String(event.facilitatorId) : "";
+  const facilitatorName = typeof event?.facilitatorName === "string" ? event.facilitatorName : "";
+  const date = typeof event?.date === "string" ? event.date : new Date().toISOString().slice(0, 10);
+  const startTime = typeof event?.startTime === "string" ? event.startTime : "09:00";
+
   return {
-    id: String(event.id),
-    projectId: String(event.projectId),
-    projectName: event.projectName,
-    facilitatorId: String(event.facilitatorId),
-    facilitatorName: event.facilitatorName,
-    date: event.date,
-    startTime: event.startTime,
-    agenda: event.agenda || "",
-    agendaSource: event.agendaSource || "custom",
-    createdAt: event.createdAt || new Date().toISOString(),
+    id: String(event.id || generateEventId(date, startTime)),
+    eventType,
+    projectId,
+    projectName,
+    facilitatorId,
+    facilitatorName,
+    date,
+    startTime,
+    agenda: event?.agenda ? String(event.agenda) : "",
+    agendaSource: event?.agendaSource || "custom",
+    createdAt: event?.createdAt || new Date().toISOString(),
+    facilitatorMention: event?.facilitatorMention || "",
+    updatedAt: event?.updatedAt || null,
   };
 }
 
@@ -546,54 +618,38 @@ function handleScheduleQuery(requestUrl, res) {
 }
 
 async function handleScheduleCreate(body, res) {
-  const projectId = typeof body.projectId === "string" ? body.projectId.trim() : "";
-  const facilitatorId = typeof body.facilitatorId === "string" ? body.facilitatorId.trim() : "";
-  const templateId = typeof body.templateId === "string" ? body.templateId.trim() : "";
-  const customAgenda = typeof body.customAgenda === "string" ? body.customAgenda.trim() : "";
-  const date = typeof body.date === "string" ? body.date.trim() : "";
-  const startTime = typeof body.startTime === "string" ? body.startTime.trim() : "";
-
-  const { projectMap } = await getProjectData();
-  const project = projectMap.get(projectId);
-  if (!project) {
-    return sendJson(res, { error: "指定されたプロジェクトが見つかりません。" }, 400);
+  const validation = await normalizeSchedulePayload(body);
+  if (!validation.ok) {
+    return sendJson(res, { error: validation.error }, validation.statusCode);
   }
 
-  const facilitator = project.members.find((member) => member.id === facilitatorId);
-  if (!facilitator) {
-    return sendJson(res, { error: "ファシリテーターに選択されたメンバーがプロジェクトに存在しません。" }, 400);
-  }
-
-  if (!isValidDateInput(date)) {
-    return sendJson(res, { error: "日付を YYYY-MM-DD 形式で指定してください。" }, 400);
-  }
-
-  if (!isValidTimeInput(startTime)) {
-    return sendJson(res, { error: "開始時刻を HH:MM 形式で指定してください。" }, 400);
-  }
-
-  const template = templateId ? agendaTemplates.find((item) => item.id === templateId) : null;
-  let agendaBody = customAgenda;
-  let agendaSource = "custom";
-
-  if (template && !agendaBody) {
-    agendaBody = template.body;
-    agendaSource = template.name;
-  } else if (!agendaBody) {
-    return sendJson(res, { error: "アジェンダを入力するかテンプレートを選択してください。" }, 400);
-  }
+  const {
+    eventType,
+    projectId,
+    projectName,
+    facilitatorId,
+    facilitatorName,
+    date,
+    startTime,
+    agendaBody,
+    agendaSource,
+    facilitatorMention,
+  } = validation;
 
   const event = {
     id: generateEventId(date, startTime),
+    eventType,
     projectId,
-    projectName: project.name,
+    projectName,
     facilitatorId,
-    facilitatorName: facilitator.name,
+    facilitatorName,
+    facilitatorMention,
     date,
     startTime,
     agenda: agendaBody,
     agendaSource,
     createdAt: new Date().toISOString(),
+    updatedAt: null,
   };
 
   schedule.push(event);
@@ -619,15 +675,237 @@ async function handleScheduleCreate(body, res) {
   return sendJson(res, { event, slackStatus }, 201);
 }
 
+async function handleScheduleUpdate(eventId, body, res) {
+  if (!eventId) {
+    return sendJson(res, { error: "イベント ID が指定されていません。" }, 400);
+  }
+
+  const existingIndex = schedule.findIndex((event) => event.id === eventId);
+  if (existingIndex === -1) {
+    return sendJson(res, { error: "指定されたスケジュールが見つかりません。" }, 404);
+  }
+
+  const validation = await normalizeSchedulePayload(body);
+  if (!validation.ok) {
+    return sendJson(res, { error: validation.error }, validation.statusCode);
+  }
+
+  const {
+    eventType,
+    projectId,
+    projectName,
+    facilitatorId,
+    facilitatorName,
+    date,
+    startTime,
+    agendaBody,
+    agendaSource,
+    facilitatorMention,
+  } = validation;
+
+  const existing = schedule[existingIndex];
+  const updated = {
+    ...existing,
+    eventType,
+    projectId,
+    projectName,
+    facilitatorId,
+    facilitatorName,
+    facilitatorMention,
+    date,
+    startTime,
+    agenda: agendaBody,
+    agendaSource,
+    updatedAt: new Date().toISOString(),
+  };
+
+  schedule[existingIndex] = updated;
+  sortScheduleInPlace(schedule);
+  saveSchedule(schedule);
+
+  return sendJson(res, { event: updated, slackStatus: null }, 200);
+}
+
+async function handleScheduleDelete(eventId, res) {
+  if (!eventId) {
+    return sendJson(res, { error: "イベント ID が指定されていません。" }, 400);
+  }
+
+  const index = schedule.findIndex((event) => event.id === eventId);
+  if (index === -1) {
+    return sendJson(res, { error: "指定されたスケジュールが見つかりません。" }, 404);
+  }
+
+  const [removed] = schedule.splice(index, 1);
+  saveSchedule(schedule);
+
+  return sendJson(res, { event: removed }, 200);
+}
+
+async function normalizeSchedulePayload(body) {
+  const eventTypeInput = typeof body.eventType === "string" ? body.eventType.trim() : "";
+  const eventType = eventTypeInput === EVENT_TYPE_SHARED ? EVENT_TYPE_SHARED : EVENT_TYPE_MEETING;
+  const projectIdInput = typeof body.projectId === "string" ? body.projectId.trim() : "";
+  const projectNameInput = typeof body.projectName === "string" ? body.projectName.trim() : "";
+  const facilitatorIdInput = typeof body.facilitatorId === "string" ? body.facilitatorId.trim() : "";
+  const templateId = typeof body.templateId === "string" ? body.templateId.trim() : "";
+  const customAgenda = typeof body.customAgenda === "string" ? body.customAgenda.trim() : "";
+  const date = typeof body.date === "string" ? body.date.trim() : "";
+  const startTime = typeof body.startTime === "string" ? body.startTime.trim() : "";
+  const mentionInput = typeof body.facilitatorMention === "string" ? body.facilitatorMention.trim() : "";
+  const facilitatorMention = mentionInput.replace(/\s+/g, " ").trim().slice(0, 120);
+
+  const { projectMap } = await getProjectData();
+  const project = projectIdInput ? projectMap.get(projectIdInput) : null;
+
+  if (!isValidDateInput(date)) {
+    return { ok: false, error: "日付を YYYY-MM-DD 形式で指定してください。", statusCode: 400 };
+  }
+
+  if (!isValidTimeInput(startTime)) {
+    return { ok: false, error: "開始時刻を HH:MM 形式で指定してください。", statusCode: 400 };
+  }
+
+  if (eventType === EVENT_TYPE_MEETING) {
+    if (!project) {
+      return { ok: false, error: "指定されたプロジェクトが見つかりません。", statusCode: 400 };
+    }
+    if (!facilitatorIdInput) {
+      return { ok: false, error: "ファシリテーターを選択してください。", statusCode: 400 };
+    }
+    const facilitator = project.members.find((member) => member.id === facilitatorIdInput);
+    if (!facilitator) {
+      return {
+        ok: false,
+        error: "ファシリテーターに選択されたメンバーがプロジェクトに存在しません。",
+        statusCode: 400,
+      };
+    }
+
+    const template = templateId ? agendaTemplates.find((item) => item.id === templateId) : null;
+    let agendaBody = customAgenda;
+    let agendaSource = "custom";
+
+    if (template && !agendaBody) {
+      agendaBody = template.body;
+      agendaSource = template.name;
+    } else if (!agendaBody) {
+      return { ok: false, error: "アジェンダを入力するかテンプレートを選択してください。", statusCode: 400 };
+    }
+
+    return {
+      ok: true,
+      eventType,
+      projectId: project.id,
+      projectName: project.name,
+      facilitatorId: facilitator.id,
+      facilitatorName: facilitator.name,
+      date,
+      startTime,
+      agendaBody,
+      agendaSource,
+      facilitatorMention,
+    };
+  }
+
+  const template = templateId ? agendaTemplates.find((item) => item.id === templateId) : null;
+  let agendaBody = customAgenda;
+  let agendaSource = "custom";
+
+  if (template && !agendaBody) {
+    agendaBody = template.body;
+    agendaSource = template.name;
+  } else if (!agendaBody) {
+    return { ok: false, error: "アジェンダを入力するかテンプレートを選択してください。", statusCode: 400 };
+  }
+
+  const projectName = projectNameInput || (project ? project.name : "共有イベント");
+
+  return {
+    ok: true,
+    eventType,
+    projectId: project ? project.id : "",
+    projectName,
+    facilitatorId: "",
+    facilitatorName: "",
+    date,
+    startTime,
+    agendaBody,
+    agendaSource,
+    facilitatorMention,
+  };
+}
+
+function handleHolidayList(res) {
+  const holidays = getSortedHolidays().map((holiday) => cloneHoliday(holiday));
+  return sendJson(res, { holidays });
+}
+
+function handleHolidayCreate(body, res) {
+  const date = typeof body.date === "string" ? body.date.trim() : "";
+  const name = typeof body.name === "string" ? body.name.trim() : "";
+
+  if (!isValidDateInput(date)) {
+    return sendJson(res, { error: "日付を YYYY-MM-DD 形式で指定してください。" }, 400);
+  }
+
+  if (!name) {
+    return sendJson(res, { error: "休日名を入力してください。" }, 400);
+  }
+
+  const holidays = customData.holidays || [];
+  if (holidays.some((holiday) => holiday.date === date)) {
+    return sendJson(res, { error: "同じ日付の休日が既に登録されています。" }, 409);
+  }
+
+  const holiday = {
+    id: generateHolidayId(date, name),
+    date,
+    name,
+    createdAt: new Date().toISOString(),
+  };
+
+  holidays.push(holiday);
+  customData.holidays = holidays;
+  saveCustomData();
+
+  return sendJson(res, { holiday: cloneHoliday(holiday) }, 201);
+}
+
+function handleHolidayDelete(holidayId, res) {
+  if (!holidayId) {
+    return sendJson(res, { error: "休日 ID が指定されていません。" }, 400);
+  }
+
+  const holidays = customData.holidays || [];
+  const index = holidays.findIndex((holiday) => holiday.id === holidayId);
+  if (index === -1) {
+    return sendJson(res, { error: "指定された休日が見つかりません。" }, 404);
+  }
+
+  const [removed] = holidays.splice(index, 1);
+  customData.holidays = holidays;
+  saveCustomData();
+
+  return sendJson(res, { deleted: removed.id }, 200);
+}
+
 function buildSlackPayload(event) {
   const dateTime = `${event.date} ${event.startTime}`;
-  const lines = [
-    `*${event.projectName}* のミーティング`,
-    `日時: ${dateTime}`,
-    `ファシリテーター: ${event.facilitatorName}`,
-    "アジェンダ:",
-    event.agenda,
-  ];
+  const typeLabel = event.eventType === EVENT_TYPE_SHARED ? "共有イベント" : "ミーティング";
+  const title = event.projectName || (event.eventType === EVENT_TYPE_SHARED ? "共有イベント" : "ミーティング");
+  const lines = [`*${title}* の${typeLabel}`, `日時: ${dateTime}`];
+
+  if (event.eventType === EVENT_TYPE_MEETING) {
+    const facilitatorLine = event.facilitatorMention
+      ? `ファシリテーター: ${event.facilitatorName} (${event.facilitatorMention})`
+      : `ファシリテーター: ${event.facilitatorName}`;
+    lines.push(facilitatorLine);
+  } else if (event.facilitatorMention) {
+    lines.push(`メンション: ${event.facilitatorMention}`);
+  }
+
+  lines.push("アジェンダ:", event.agenda);
 
   return { text: lines.join("\n") };
 }
@@ -725,7 +1003,9 @@ function sortScheduleInPlace(list) {
     const keyB = `${b.date}T${b.startTime}`;
     if (keyA < keyB) return -1;
     if (keyA > keyB) return 1;
-    return a.projectName.localeCompare(b.projectName, "ja");
+    const nameA = a.projectName || "";
+    const nameB = b.projectName || "";
+    return nameA.localeCompare(nameB, "ja");
   });
 }
 
@@ -746,6 +1026,15 @@ function cloneMember(member) {
   return {
     id: String(member.id),
     name: member.name,
+  };
+}
+
+function cloneHoliday(holiday) {
+  return {
+    id: String(holiday.id),
+    date: holiday.date,
+    name: holiday.name,
+    createdAt: holiday.createdAt || null,
   };
 }
 

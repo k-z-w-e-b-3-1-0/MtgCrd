@@ -20,18 +20,53 @@
       <div class="layout">
         <section class="scheduler-form">
           <form id="assignment-form">
+            <input type="hidden" id="event-id" name="eventId" />
+
             <fieldset>
-              <label for="project-select">プロジェクト</label>
-              <select id="project-select" name="projectId" required>
-                <option value="" disabled selected>プロジェクトを選択してください</option>
-              </select>
+              <legend>イベント種別</legend>
+              <label>
+                <input type="radio" name="eventType" value="meeting" checked />
+                ミーティング
+              </label>
+              <label>
+                <input type="radio" name="eventType" value="shared" />
+                共有イベント（連絡事項など）
+              </label>
+            </fieldset>
+
+            <fieldset>
+              <label for="project-input">プロジェクト / トピック</label>
+              <input
+                type="text"
+                id="project-input"
+                name="projectName"
+                placeholder="例: サポート改善プロジェクト"
+                autocomplete="off"
+                list="project-options"
+                required
+              />
+              <datalist id="project-options"></datalist>
+              <input type="hidden" id="project-id" name="projectId" />
+              <small>候補から選択するか、任意の名称を入力できます。</small>
             </fieldset>
 
             <fieldset>
               <label for="facilitator-select">ファシリテーター</label>
-              <select id="facilitator-select" name="facilitatorId" required disabled>
+              <select id="facilitator-select" name="facilitatorId" disabled>
                 <option value="" disabled selected>メンバーを選択してください</option>
               </select>
+              <small id="facilitator-help" class="facilitator-help"></small>
+            </fieldset>
+
+            <fieldset>
+              <label for="facilitator-mention">ファシリテーターメンション (Slack)</label>
+              <input
+                type="text"
+                id="facilitator-mention"
+                name="facilitatorMention"
+                placeholder="例: <@U123456>"
+              />
+              <small>Slack 通知でファシリテーターにメンションする場合に入力します。</small>
             </fieldset>
 
             <fieldset>
@@ -63,7 +98,17 @@
               <small>テンプレートを選択した場合でも、必要に応じて編集できます。</small>
             </fieldset>
 
-            <button type="submit" id="submit-button">ミーティングをスケジュール</button>
+            <div id="editing-notice" class="editing-notice" hidden>
+              <span>カレンダーから選択した予定を編集中です。</span>
+              <button type="button" id="cancel-edit" class="secondary outline">編集をキャンセル</button>
+            </div>
+
+            <div class="form-actions">
+              <button type="submit" id="submit-button">予定を保存</button>
+              <button type="button" id="delete-event" class="secondary outline" hidden>
+                予定を削除
+              </button>
+            </div>
           </form>
 
           <section id="result" hidden>
@@ -91,6 +136,33 @@
           <div id="calendar-grid" class="calendar-grid" aria-live="polite"></div>
         </section>
       </div>
+
+      <section class="holiday-management" aria-label="休日設定">
+        <h2>休日設定</h2>
+        <p class="holiday-management__description">
+          プロジェクトの予定から除外したい日を登録できます。登録した休日はカレンダー上で強調表示されます。
+        </p>
+        <form id="holiday-form" class="holiday-management__form">
+          <div class="grid">
+            <label>
+              日付
+              <input type="date" id="holiday-date" name="date" required />
+            </label>
+            <label>
+              名称
+              <input
+                type="text"
+                id="holiday-name"
+                name="name"
+                placeholder="例: 年末年始休業"
+                required
+              />
+            </label>
+          </div>
+          <button type="submit">休日を登録</button>
+        </form>
+        <div id="holiday-list" class="holiday-list" aria-live="polite"></div>
+      </section>
 
       <section class="project-management" aria-label="プロジェクトとメンバーの管理">
         <h2>プロジェクトとメンバーの管理</h2>

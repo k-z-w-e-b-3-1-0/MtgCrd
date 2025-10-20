@@ -1,6 +1,7 @@
 [
   {
     "id": "evt-20240515-standup",
+    "eventType": "meeting",
     "projectId": "prd-support",
     "projectName": "サポート改善プロジェクト",
     "facilitatorId": "saito",
@@ -13,6 +14,7 @@
   },
   {
     "id": "evt-20240603-retro",
+    "eventType": "meeting",
     "projectId": "prd-mobile",
     "projectName": "モバイルアプリ刷新",
     "facilitatorId": "smith",
