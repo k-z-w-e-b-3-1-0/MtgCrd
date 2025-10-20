@@ -5,8 +5,11 @@ import {
   customProjectForm,
   customProjectMembersInput,
   customProjectNameInput,
+  facilitatorHelp,
   facilitatorSelect,
-  projectSelect,
+  projectIdInput,
+  projectInput,
+  projectOptionsList,
 } from "./dom.js";
 import {
   clearProjectNotice,
@@ -24,10 +27,13 @@ export function initializeProjectManagement() {
   if (customMemberProjectSelect) {
     customMemberProjectSelect.disabled = true;
   }
+  updateFacilitatorOptions(null);
+  setFacilitatorHelpText("");
 }
 
 export async function fetchProjects(options = {}) {
-  const previousProjectId = options.preferredProjectId ?? (projectSelect ? projectSelect.value : "");
+  const previousProjectId = options.preferredProjectId ?? (projectIdInput ? projectIdInput.value : "");
+  const previousProjectName = options.preferredProjectName ?? (projectInput ? projectInput.value : "");
   const previousMemberProjectId =
     options.preferredMemberProjectId ?? (customMemberProjectSelect ? customMemberProjectSelect.value : "");
 
@@ -40,7 +46,7 @@ export async function fetchProjects(options = {}) {
   projectsCache = Array.isArray(data.projects) ? data.projects : [];
 
   updateProjectStatus(data.meta, projectsCache.length);
-  rebuildProjectSelects(previousProjectId, previousMemberProjectId);
+  rebuildProjectInputs({ projectId: previousProjectId, projectName: previousProjectName, memberProjectId: previousMemberProjectId });
 
   if (options.noticeMessage) {
     showProjectNotice(options.noticeMessage);
@@ -51,17 +57,31 @@ export async function fetchProjects(options = {}) {
   return projectsCache;
 }
 
-function rebuildProjectSelects(projectId, memberProjectId) {
-  populateProjectSelect(projectSelect, "プロジェクトを選択してください", projectId);
-  onProjectChange();
+function rebuildProjectInputs({ projectId, projectName, memberProjectId }) {
+  populateProjectOptions();
+  setProjectSelection(projectId, projectName);
 
   if (customMemberProjectSelect) {
-    populateProjectSelect(customMemberProjectSelect, "メンバーを追加するプロジェクトを選択", memberProjectId);
+    populateMemberProjectSelect(customMemberProjectSelect, "メンバーを追加するプロジェクトを選択", memberProjectId);
     customMemberProjectSelect.disabled = projectsCache.length === 0;
   }
 }
 
-function populateProjectSelect(selectElement, placeholderText, selectedId) {
+function populateProjectOptions() {
+  if (!projectOptionsList) {
+    return;
+  }
+
+  projectOptionsList.replaceChildren();
+  projectsCache.forEach((project) => {
+    const option = document.createElement("option");
+    option.value = project.name;
+    option.dataset.projectId = project.id;
+    projectOptionsList.append(option);
+  });
+}
+
+function populateMemberProjectSelect(selectElement, placeholderText, selectedId) {
   if (!selectElement) {
     return;
   }
@@ -90,12 +110,55 @@ function populateProjectSelect(selectElement, placeholderText, selectedId) {
   selectElement.disabled = projectsCache.length === 0;
 }
 
-export function onProjectChange() {
-  if (!facilitatorSelect || !projectSelect) {
+export function handleProjectInputChange() {
+  return syncProjectInputWithHiddenId();
+}
+
+export function setProjectSelection(projectId, projectName = "") {
+  const project = projectId ? projectsCache.find((p) => p.id === projectId) : null;
+
+  if (projectInput) {
+    projectInput.value = project ? project.name : projectName;
+  }
+
+  if (projectIdInput) {
+    projectIdInput.value = project ? project.id : projectId ?? "";
+  }
+
+  updateFacilitatorOptions(project ?? null);
+  return project ?? null;
+}
+
+export function getProjectById(projectId) {
+  if (!projectId) {
+    return null;
+  }
+  return projectsCache.find((project) => project.id === projectId) || null;
+}
+
+export function setFacilitatorHelp(message) {
+  setFacilitatorHelpText(message);
+}
+
+function syncProjectInputWithHiddenId() {
+  if (!projectInput) {
+    return null;
+  }
+
+  const value = projectInput.value.trim();
+  const project = projectsCache.find((item) => item.name === value) || null;
+  if (projectIdInput) {
+    projectIdInput.value = project ? project.id : "";
+  }
+  updateFacilitatorOptions(project);
+  return project;
+}
+
+function updateFacilitatorOptions(project) {
+  if (!facilitatorSelect) {
     return;
   }
 
-  const project = projectsCache.find((p) => p.id === projectSelect.value);
   facilitatorSelect.replaceChildren();
 
   const defaultOption = document.createElement("option");
@@ -116,7 +179,13 @@ export function onProjectChange() {
     option.textContent = member.name;
     facilitatorSelect.append(option);
   });
-  facilitatorSelect.disabled = false;
+  facilitatorSelect.disabled = project.members.length === 0;
+}
+
+function setFacilitatorHelpText(message) {
+  if (facilitatorHelp) {
+    facilitatorHelp.textContent = message;
+  }
 }
 
 export function handleRefreshProjects() {

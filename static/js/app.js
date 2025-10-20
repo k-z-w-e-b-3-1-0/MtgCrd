@@ -4,7 +4,6 @@ import {
   form,
   nextMonthButton,
   prevMonthButton,
-  projectSelect,
   refreshProjectsButton,
   templateSelect,
 } from "./modules/dom.js";
@@ -15,10 +14,10 @@ import {
   handleCustomProjectSubmit,
   handleRefreshProjects,
   initializeProjectManagement,
-  onProjectChange,
 } from "./modules/projects.js";
 import { changeMonth, initializeCalendar } from "./modules/calendar.js";
-import { handleFormSubmit, setDefaultDateTime } from "./modules/scheduleForm.js";
+import { initializeHolidayManagement, fetchHolidays } from "./modules/holidays.js";
+import { initializeScheduleForm, handleFormSubmit, setDefaultDateTime } from "./modules/scheduleForm.js";
 import { fetchTemplates, onTemplateChange } from "./modules/templates.js";
 
 initialize().catch((error) => {
@@ -28,16 +27,15 @@ initialize().catch((error) => {
 
 async function initialize() {
   setDefaultDateTime();
+  initializeScheduleForm();
   attachEventListeners();
   initializeProjectManagement();
-  await Promise.all([fetchProjects(), fetchTemplates()]);
+  initializeHolidayManagement();
+  await Promise.all([fetchProjects(), fetchTemplates(), fetchHolidays()]);
   await initializeCalendar();
 }
 
 function attachEventListeners() {
-  if (projectSelect) {
-    projectSelect.addEventListener("change", onProjectChange);
-  }
   if (templateSelect) {
     templateSelect.addEventListener("change", onTemplateChange);
   }

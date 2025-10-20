@@ -4,6 +4,11 @@ import { formatDateString, sortEventsInPlace, startOfMonth } from "./utils.js";
 let currentMonth = startOfMonth(new Date());
 const todayString = formatDateString(new Date());
 let scheduleCache = [];
+let holidaysCache = [];
+let selectedEventId = null;
+const eventSelectListeners = new Set();
+const EVENT_TYPE_MEETING = "meeting";
+const EVENT_TYPE_SHARED = "shared";
 
 export async function initializeCalendar() {
   updateMonthLabel();
@@ -37,7 +42,13 @@ export async function loadScheduleForCurrentMonth() {
 }
 
 export async function updateCalendarWithEvent(eventData) {
-  const eventMonthDate = new Date(`${eventData.date}T00:00:00`);
+  const normalized = normalizeEventFromApi(eventData);
+  const existingIndex = scheduleCache.findIndex((event) => event.id === normalized.id);
+  if (existingIndex !== -1) {
+    scheduleCache.splice(existingIndex, 1);
+  }
+
+  const eventMonthDate = new Date(`${normalized.date}T00:00:00`);
   if (Number.isNaN(eventMonthDate.getTime())) {
     await loadScheduleForCurrentMonth();
     return;
@@ -49,12 +60,57 @@ export async function updateCalendarWithEvent(eventData) {
 
   if (!isSameMonth) {
     setCurrentMonth(eventMonthDate);
+    selectedEventId = normalized.id;
     await loadScheduleForCurrentMonth();
   } else {
-    scheduleCache.push(eventData);
+    scheduleCache.push(normalized);
     sortEventsInPlace(scheduleCache);
+    selectedEventId = normalized.id;
     renderCalendar();
   }
+}
+
+export function onCalendarEventSelect(listener) {
+  if (typeof listener !== "function") {
+    return () => {};
+  }
+  eventSelectListeners.add(listener);
+  return () => {
+    eventSelectListeners.delete(listener);
+  };
+}
+
+export function setHolidays(holidays) {
+  if (!Array.isArray(holidays)) {
+    holidaysCache = [];
+  } else {
+    holidaysCache = holidays
+      .map((holiday) => ({
+        id: String(holiday.id),
+        date: holiday.date,
+        name: holiday.name,
+      }))
+      .filter((holiday) => Boolean(holiday.date) && Boolean(holiday.name));
+    holidaysCache.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : a.name.localeCompare(b.name, "ja")));
+  }
+
+  renderCalendar();
+}
+
+export function clearSelectedEvent() {
+  selectedEventId = null;
+  renderCalendar();
+}
+
+export function removeEventFromCalendar(eventId) {
+  const index = scheduleCache.findIndex((event) => event.id === eventId);
+  if (index !== -1) {
+    scheduleCache.splice(index, 1);
+  }
+  if (selectedEventId === eventId) {
+    selectedEventId = null;
+  }
+  renderCalendar();
 }
 
 function setCurrentMonth(date) {
@@ -95,10 +151,22 @@ function renderCalendar() {
       cell.classList.add("calendar-cell--today");
     }
 
+    const holiday = getHolidayForDate(dateString);
+    if (holiday) {
+      cell.classList.add("calendar-cell--holiday");
+    }
+
     const dayNumber = document.createElement("header");
     dayNumber.className = "calendar-day-number";
     dayNumber.textContent = String(day);
     cell.append(dayNumber);
+
+    if (holiday) {
+      const holidayLabel = document.createElement("span");
+      holidayLabel.className = "calendar-holiday-label";
+      holidayLabel.textContent = holiday.name;
+      cell.append(holidayLabel);
+    }
 
     const eventsForDay = scheduleCache.filter((event) => event.date === dateString);
     if (eventsForDay.length > 0) {
@@ -125,7 +193,12 @@ function renderCalendar() {
 function createEventElement(event) {
   const container = document.createElement("div");
   container.className = "calendar-event";
+  container.dataset.eventId = event.id;
+  container.tabIndex = 0;
   container.title = event.agenda || "";
+  if (event.id === selectedEventId) {
+    container.classList.add("calendar-event--selected");
+  }
 
   const time = document.createElement("span");
   time.className = "calendar-event-time";
@@ -133,26 +206,81 @@ function createEventElement(event) {
 
   const title = document.createElement("span");
   title.className = "calendar-event-title";
-  title.textContent = event.projectName;
+  title.textContent = event.projectName || (event.eventType === EVENT_TYPE_SHARED ? "共有イベント" : "ミーティング");
 
-  const facilitator = document.createElement("span");
-  facilitator.className = "calendar-event-facilitator";
-  facilitator.textContent = `ファシリテーター: ${event.facilitatorName}`;
+  container.append(time, title);
 
-  container.append(time, title, facilitator);
+  if (event.eventType === EVENT_TYPE_MEETING) {
+    const facilitator = document.createElement("span");
+    facilitator.className = "calendar-event-facilitator";
+    const facilitatorName = event.facilitatorName || "未指定";
+    facilitator.textContent = `ファシリテーター: ${facilitatorName}`;
+    container.append(facilitator);
+    if (event.facilitatorMention) {
+      const mention = document.createElement("span");
+      mention.className = "calendar-event-mention";
+      mention.textContent = `メンション: ${event.facilitatorMention}`;
+      container.append(mention);
+    }
+  } else {
+    const typeLabel = document.createElement("span");
+    typeLabel.className = "calendar-event-type";
+    typeLabel.textContent = "共有イベント";
+    container.append(typeLabel);
+    if (event.facilitatorMention) {
+      const mention = document.createElement("span");
+      mention.className = "calendar-event-mention";
+      mention.textContent = `メンション: ${event.facilitatorMention}`;
+      container.append(mention);
+    }
+  }
+
+  container.addEventListener("click", () => {
+    handleEventSelection(event.id);
+  });
+  container.addEventListener("keydown", (keyboardEvent) => {
+    if (keyboardEvent.key === "Enter" || keyboardEvent.key === " ") {
+      keyboardEvent.preventDefault();
+      handleEventSelection(event.id);
+    }
+  });
   return container;
 }
 
 function normalizeEventFromApi(event) {
   return {
     id: String(event.id),
-    projectId: String(event.projectId),
-    projectName: event.projectName,
-    facilitatorId: String(event.facilitatorId),
-    facilitatorName: event.facilitatorName,
+    eventType: event.eventType === EVENT_TYPE_SHARED ? EVENT_TYPE_SHARED : EVENT_TYPE_MEETING,
+    projectId: event.projectId ? String(event.projectId) : "",
+    projectName: event.projectName || "",
+    facilitatorId: event.facilitatorId ? String(event.facilitatorId) : "",
+    facilitatorName: event.facilitatorName || "",
     date: event.date,
     startTime: event.startTime,
     agenda: event.agenda || "",
     agendaSource: event.agendaSource || "custom",
+    facilitatorMention: event.facilitatorMention || "",
+    createdAt: event.createdAt || new Date().toISOString(),
+    updatedAt: event.updatedAt || null,
   };
+}
+
+function handleEventSelection(eventId) {
+  selectedEventId = eventId;
+  renderCalendar();
+  const event = scheduleCache.find((item) => item.id === eventId);
+  if (!event) {
+    return;
+  }
+  eventSelectListeners.forEach((listener) => {
+    try {
+      listener({ ...event });
+    } catch (error) {
+      console.error(error);
+    }
+  });
+}
+
+function getHolidayForDate(date) {
+  return holidaysCache.find((holiday) => holiday.date === date) || null;
 }
